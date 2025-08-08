@@ -1,1 +1,6 @@
 venv38/
+__pycache__/
+*.pyc
+model/
+output.mid
+
