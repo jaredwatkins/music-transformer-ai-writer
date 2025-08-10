@@ -1,3 +1,32 @@
+# Ignore virtual environments
+venv*
+ENV/
+env/
+
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*.so
+
+# System files
+.DS_Store
+*.swp
+
+# Jupyter and IPython
+.ipynb_checkpoints/
+
+# Audio & MIDI outputs
+*.wav
+*.mp3
+*.mid
+
+# Model files
+*.mag
+*.ckpt*
+*.tar
+
+# Logs
+*.log
 venv38/
 __pycache__/
 *.pyc
