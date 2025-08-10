@@ -1,39 +1,43 @@
-import magenta
-import note_seq
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
+from note_seq import midi_io, sequences_lib, music_pb2
+from magenta.models.music_vae import configs
+from magenta.models.music_vae.trained_model import TrainedModel
 
-from magenta.models.transformer import transformer_model
-from magenta.models.transformer import transformer_dataset
-from magenta.models.transformer import transformer_utils
+# --- config & model ---
+config = configs.CONFIG_MAP['cat-mel_2bar_big']
+model = TrainedModel(config, batch_size=4, checkpoint_dir_or_path='cat-mel_2bar_big.ckpt')
 
-from utils.midi_utils import midi_to_note_sequence, note_sequence_to_midi
+# --- load seed ---
+seed = midi_io.midi_file_to_note_sequence('seed.mid')
 
-# Load the seed input
-seed_path = 'seed.mid'
-seed_sequence = midi_to_note_sequence(seed_path)
+# --- normalize to a single tempo (MusicVAE quantizer needs this) ---
+# If there are multiple tempos, replace with one at time=0.
+if len(seed.tempos) == 0:
+    t = seed.tempos.add(); t.qpm = 120.0; t.time = 0.0
+elif len(seed.tempos) > 1:
+    qpm = seed.tempos[0].qpm  # pick the first; or set your own constant (e.g., 120.0)
+    del seed.tempos[:]
+    t = seed.tempos.add(); t.qpm = qpm; t.time = 0.0
+else:
+    qpm = seed.tempos[0].qpm
 
-# Define model parameters
-config = transformer_utils.get_transformer_config('melody_rnn')
-config.hparams.batch_size = 1
-checkpoint_path = 'model/model.ckpt'
+# --- compute two-bar window in seconds BEFORE quantizing ---
+# assume default 4/4 unless present
+num = 4; den = 4
+if len(seed.time_signatures) > 0:
+    num = seed.time_signatures[0].numerator
+    den = seed.time_signatures[0].denominator
 
-# Initialize the model
-model = transformer_model.TransformerModel(config, is_training=False, name='transformer')
-inputs = transformer_dataset.get_dataset(config, is_training=False).make_one_shot_iterator().get_next()
+quarters_per_bar = num * (4.0 / den)
+seconds_per_quarter = 60.0 / qpm
+two_bars_seconds = 2 * quarters_per_bar * seconds_per_quarter
 
-# Run the generation
-with tf.Session() as sess:
-    model.initialize(sess)
-    model.restore(sess, checkpoint_path)
+# --- trim unquantized, then quantize ---
+trimmed = sequences_lib.extract_subsequence(seed, 0.0, two_bars_seconds)
+quantized = sequences_lib.quantize_note_sequence(trimmed, steps_per_quarter=4)
 
-    generated_seq = model.generate(
-        sess,
-        primer_sequence=seed_sequence,
-        generate_length=128,
-        temperature=1.0
-    )
+# --- generate ---
+generated = model.sample(n=4, length=32, primer_sequence=quantized, temperature=1.0)
 
-# Save the output
-note_sequence_to_midi(generated_seq, 'output.mid')
-print("Melody generated and saved to output.mid.")
+# --- save first result ---
+midi_io.sequence_proto_to_midi_file(generated[0], 'output.mid')
+print("✅ Generated melody saved as output.mid")
